@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Voice GPT Assistant</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; padding: 2rem; }
+    #output { white-space: pre-wrap; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+<h1>🎤 GPT Voice Assistant</h1>
+<div id="output">Initializing voice assistant...</div>
+
+<script>
+  const output = document.getElementById('output');
+  const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+  recognition.continuous = false; // Set to false to manually restart after each result
+
+  // Start listening immediately
+  let isListening = true;
+  recognition.start();
+
+  recognition.onresult = async (event) => {
+    const text = event.results[0][0].transcript;
+    output.textContent = "🗣️ You said: " + text + "\n⏳ GPT is thinking...";
+    try {
+      const response = await fetch("https://aigen-9t0e.onrender.com/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text })
+      });
+      const data = await response.json();
+      output.textContent += "\n🤖 GPT: " + data.response;
+      speak(data.response);
+    } catch (e) {
+      output.textContent += "\n❌ Error contacting backend: " + e.message;
+    }
+  };
+
+  recognition.onerror = (event) => {
+    output.textContent = "⚠️ Error: " + event.error;
+    if (isListening) setTimeout(() => recognition.start(), 1000); // retry on error
+  };
+
+  recognition.onend = () => {
+    if (isListening) recognition.start(); // restart recognition automatically
+  };
+
+  function speak(text) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    window.speechSynthesis.speak(utterance);
+  }
+</script>
+</body>
+</html>
