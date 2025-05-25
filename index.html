@@ -1,80 +1,86 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>Voice GPT Assistant</title>
+  <title>Seamless Voice Chat</title>
 </head>
 <body>
-  <h1>🎤 GPT Voice Assistant</h1>
-  <button onclick="startAssistant()">▶️ Start Assistants</button>
-  <div id="output">Click the button to start...</div>
+  <h1>🎙️ Talking to GPT...</h1>
+  <div id="status">Starting...</div>
 
   <script>
-    let recognition; // <-- FIXED: declared with let so we can assign it later
-    let isListening = false;
-    const output = document.getElementById('output');
+    const status = document.getElementById("status");
+    let mediaRecorder;
+    let stream;
 
-    function startAssistant() {
+    async function startMicLoop() {
       try {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-          output.textContent = "❌ SpeechRecognition not supported in this browser.";
-          return;
-        }
-
-        recognition = new SpeechRecognition();
-        recognition.lang = 'en-US';
-        recognition.interimResults = false;
-        recognition.continuous = true;
-
-        recognition.onstart = () => {
-          output.textContent = "🎤 Listening...";
-          isListening = true;
-        };
-
-        recognition.onresult = async (event) => {
-          const text = event.results[event.results.length - 1][0].transcript;
-          output.textContent = `🗣️ You said: ${text}\n⏳ GPT is thinking...`;
-
-          try {
-            const response = await fetch("https://aigen-9t0e.onrender.com/chat", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ message: text })
-            });
-
-            const data = await response.json();
-            if (data?.response) {
-              output.textContent += `\n🤖 GPT: ${data.response}`;
-              speak(data.response);
-            } else {
-              throw new Error("No response from GPT.");
-            }
-          } catch (e) {
-            output.textContent += `\n❌ Backend error: ${e.message}`;
-            speak("There was a problem contacting the server.");
-          }
-        };
-
-        recognition.onerror = (event) => {
-          output.textContent = "⚠️ Error: " + event.error;
-        };
-
-        recognition.onend = () => {
-          if (isListening) recognition.start();
-        };
-
-        recognition.start();
-      } catch (err) {
-        output.textContent = "❌ Error initializing assistant: " + err.message;
-        console.error(err);
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        status.textContent = "🎤 Microphone ready. Recording...";
+        recordChunk();
+      } catch (e) {
+        status.textContent = `❌ Microphone access denied: ${e.message}`;
       }
     }
 
-    function speak(text) {
-      const utterance = new SpeechSynthesisUtterance(text);
-      window.speechSynthesis.speak(utterance);
+    function recordChunk() {
+      let chunks = [];
+      mediaRecorder = new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = e => chunks.push(e.data);
+
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const formData = new FormData();
+        formData.append("audio", blob);
+
+        status.textContent = "🧠 Transcribing...";
+
+        try {
+          const transRes = await fetch("https://aigen-9t0e.onrender.com/transcribe", {
+            method: "POST",
+            body: formData
+          });
+
+          const result = await transRes.json();
+          const text = result?.text;
+
+          if (!text || typeof text !== "string" || text.trim() === "") {
+            status.textContent = result?.error
+              ? `❌ Server error: ${result.error}`
+              : "🕐 No speech detected. Restarting...";
+            return setTimeout(recordChunk, 1000);
+          }
+
+          status.textContent = `🗣️ You: ${text}\n🤖 Thinking...`;
+
+          const gptRes = await fetch("https://aigen-9t0e.onrender.com/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: text })
+          });
+
+          const gptData = await gptRes.json();
+          const response = gptData?.response || "🤖 GPT: No response";
+          status.textContent = `🗣️ You: ${text}\n🤖 GPT: ${response}`;
+
+          speak(response, () => setTimeout(recordChunk, 500));
+        } catch (e) {
+          status.textContent = `❌ Error: ${e.message}`;
+          console.error("Error:", e);
+          setTimeout(recordChunk, 1000);
+        }
+      };
+
+      mediaRecorder.start();
+      setTimeout(() => mediaRecorder.stop(), 5000); // Record for 5 seconds
     }
+
+    function speak(text, onDone) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.onend = onDone;
+      speechSynthesis.speak(utterance);
+    }
+
+    startMicLoop();
   </script>
 </body>
 </html>
