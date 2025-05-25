@@ -3,56 +3,78 @@
 <head>
   <meta charset="UTF-8">
   <title>Voice GPT Assistant</title>
-  <style>
-    body { font-family: sans-serif; text-align: center; padding: 2rem; }
-    #output { white-space: pre-wrap; margin-top: 1rem; }
-  </style>
 </head>
 <body>
-<h1>🎤 GPT Voice Assistant</h1>
-<div id="output">Initializing voice assistant...</div>
+  <h1>🎤 GPT Voice Assistant</h1>
+  <button onclick="startAssistant()">▶️ Start Assistant</button>
+  <div id="output">Click the button to start...</div>
 
-<script>
-  const output = document.getElementById('output');
-  const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-  recognition.lang = 'en-US';
-  recognition.interimResults = false;
-  recognition.continuous = false; // Set to false to manually restart after each result
+  <script>
+    let recognition; // <-- FIXED: declared with let so we can assign it later
+    let isListening = false;
+    const output = document.getElementById('output');
 
-  // Start listening immediately
-  let isListening = true;
-  recognition.start();
+    function startAssistant() {
+      try {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+          output.textContent = "❌ SpeechRecognition not supported in this browser.";
+          return;
+        }
 
-  recognition.onresult = async (event) => {
-    const text = event.results[0][0].transcript;
-    output.textContent = "🗣️ You said: " + text + "\n⏳ GPT is thinking...";
-    try {
-      const response = await fetch("https://aigen-9t0e.onrender.com/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text })
-      });
-      const data = await response.json();
-      output.textContent += "\n🤖 GPT: " + data.response;
-      speak(data.response);
-    } catch (e) {
-      output.textContent += "\n❌ Error contacting backend: " + e.message;
+        recognition = new SpeechRecognition();
+        recognition.lang = 'en-US';
+        recognition.interimResults = false;
+        recognition.continuous = true;
+
+        recognition.onstart = () => {
+          output.textContent = "🎤 Listening...";
+          isListening = true;
+        };
+
+        recognition.onresult = async (event) => {
+          const text = event.results[event.results.length - 1][0].transcript;
+          output.textContent = `🗣️ You said: ${text}\n⏳ GPT is thinking...`;
+
+          try {
+            const response = await fetch("https://aigen-9t0e.onrender.com/chat", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ message: text })
+            });
+
+            const data = await response.json();
+            if (data?.response) {
+              output.textContent += `\n🤖 GPT: ${data.response}`;
+              speak(data.response);
+            } else {
+              throw new Error("No response from GPT.");
+            }
+          } catch (e) {
+            output.textContent += `\n❌ Backend error: ${e.message}`;
+            speak("There was a problem contacting the server.");
+          }
+        };
+
+        recognition.onerror = (event) => {
+          output.textContent = "⚠️ Error: " + event.error;
+        };
+
+        recognition.onend = () => {
+          if (isListening) recognition.start();
+        };
+
+        recognition.start();
+      } catch (err) {
+        output.textContent = "❌ Error initializing assistant: " + err.message;
+        console.error(err);
+      }
     }
-  };
 
-  recognition.onerror = (event) => {
-    output.textContent = "⚠️ Error: " + event.error;
-    if (isListening) setTimeout(() => recognition.start(), 1000); // retry on error
-  };
-
-  recognition.onend = () => {
-    if (isListening) recognition.start(); // restart recognition automatically
-  };
-
-  function speak(text) {
-    const utterance = new SpeechSynthesisUtterance(text);
-    window.speechSynthesis.speak(utterance);
-  }
-</script>
+    function speak(text) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      window.speechSynthesis.speak(utterance);
+    }
+  </script>
 </body>
 </html>
