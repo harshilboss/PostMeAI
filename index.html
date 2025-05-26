@@ -1,56 +1,92 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Seamless Voice Chat</title>
+  <meta charset="UTF-8" />
+  <title>Fast GPT Voice Assistant</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin-top: 4em; }
+    #status { margin: 20px; font-size: 1.2em; }
+    button { font-size: 1.2em; padding: 10px 20px; }
+  </style>
 </head>
 <body>
-  <h1>🎙️ Talking to GPT...</h1>
-  <div id="status">Starting...</div>
+<h1>🎤 GPT Voice Assistant</h1>
+<div id="status">🟡 Idle</div>
+<button onclick="startActiveListening()">▶️ Start Assistant</button>
 
-  <script>
-    const status = document.getElementById("status");
-    let mediaRecorder;
-    let stream;
+<script>
+  const status = document.getElementById("status");
+  let stream, mediaRecorder;
+  let isRunning = false;
+  const restartDelay = 500;
 
-    async function startMicLoop() {
+  async function getMicAccess() {
+    if (!stream) {
       try {
+        console.log("🎤 Requesting microphone...");
+        status.textContent = "🎤 Requesting microphone...";
         stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        status.textContent = "🎤 Microphone ready. Recording...";
-        recordChunk();
+        console.log("✅ Microphone access granted.");
+        status.textContent = "✅ Mic ready.";
       } catch (e) {
-        status.textContent = `❌ Microphone access denied: ${e.message}`;
+        console.error("❌ Mic access error:", e);
+        status.textContent = `❌ Mic error: ${e.message}`;
       }
     }
+  }
 
-    function recordChunk() {
-      let chunks = [];
+  async function startActiveListening() {
+    if (isRunning) {
+      console.log("🟡 Assistant already running.");
+      return;
+    }
+    isRunning = true;
+    console.log("▶️ Starting assistant...");
+    await getMicAccess();
+    if (!stream) return;
+    status.textContent = "🔁 Starting assistant loop...";
+    listenLoop();
+  }
+
+  async function listenLoop() {
+    while (isRunning) {
+      console.log("🎧 Starting new listen loop...");
+      status.textContent = "🎧 Listening...";
+      const chunks = [];
       mediaRecorder = new MediaRecorder(stream);
-      mediaRecorder.ondataavailable = e => chunks.push(e.data);
+
+      mediaRecorder.ondataavailable = e => {
+        console.log("📥 Audio chunk received.");
+        chunks.push(e.data);
+      };
 
       mediaRecorder.onstop = async () => {
+        console.log("🛑 Recording stopped. Processing audio...");
         const blob = new Blob(chunks, { type: 'audio/webm' });
         const formData = new FormData();
         formData.append("audio", blob);
 
         status.textContent = "🧠 Transcribing...";
-
         try {
+          console.log("📤 Sending audio for transcription...");
           const transRes = await fetch("https://aigen-9t0e.onrender.com/transcribe", {
             method: "POST",
             body: formData
           });
 
           const result = await transRes.json();
-          const text = result?.text;
+          const text = result?.text?.trim();
+          console.log("📄 Transcription result:", text);
 
-          if (!text || typeof text !== "string" || text.trim() === "") {
-            status.textContent = result?.error
-              ? `❌ Server error: ${result.error}`
-              : "🕐 No speech detected. Restarting...";
-            return setTimeout(recordChunk, 1000);
+          if (!text || text.length < 2) {
+            console.log("😕 No valid speech detected.");
+            status.textContent = "😕 Didn't catch that. Listening again...";
+            setTimeout(listenLoop, restartDelay);
+            return;
           }
 
-          status.textContent = `🗣️ You: ${text}\n🤖 Thinking...`;
+          status.textContent = `🗣️ You: ${text} 🤖 GPT thinking...`;
+          console.log("🧠 Sending text to GPT:", text);
 
           const gptRes = await fetch("https://aigen-9t0e.onrender.com/chat", {
             method: "POST",
@@ -59,28 +95,53 @@
           });
 
           const gptData = await gptRes.json();
-          const response = gptData?.response || "🤖 GPT: No response";
-          status.textContent = `🗣️ You: ${text}\n🤖 GPT: ${response}`;
+          const response = gptData?.response || "🤖 No response.";
+          console.log("🤖 GPT response:", response);
 
-          speak(response, () => setTimeout(recordChunk, 500));
+          status.textContent = `🤖 GPT: ${response}`;
+
+          console.log("🔊 Requesting TTS...");
+          const ttsRes = await fetch("https://aigen-9t0e.onrender.com/tts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: "tts-1",
+              input: response,
+              voice: "alloy"
+            })
+          });
+
+          const ttsBlob = await ttsRes.blob();
+          const audioUrl = URL.createObjectURL(ttsBlob);
+          const audio = new Audio(audioUrl);
+
+          audio.onended = () => {
+            console.log("🔁 TTS playback done. Restarting listen loop...");
+            setTimeout(listenLoop, restartDelay);
+          };
+
+          audio.play().catch(e => {
+            console.error("🔇 Audio playback failed:", e);
+            setTimeout(listenLoop, restartDelay);
+          });
+
         } catch (e) {
-          status.textContent = `❌ Error: ${e.message}`;
-          console.error("Error:", e);
-          setTimeout(recordChunk, 1000);
+          console.error("❌ Error during transcription/chat/tts:", e);
+          status.textContent = `❌ ${e.message}`;
+          setTimeout(listenLoop, restartDelay);
         }
       };
 
+      console.log("🎙️ Starting recording...");
       mediaRecorder.start();
-      setTimeout(() => mediaRecorder.stop(), 5000); // Record for 5 seconds
-    }
+      setTimeout(() => {
+        console.log("⏱️ Stopping recorder after 2.5s...");
+        mediaRecorder.stop();
+      }, 2500);
 
-    function speak(text, onDone) {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.onend = onDone;
-      speechSynthesis.speak(utterance);
+      return; // Wait for audio to finish playing
     }
-
-    startMicLoop();
-  </script>
+  }
+</script>
 </body>
 </html>
